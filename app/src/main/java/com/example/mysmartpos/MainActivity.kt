@@ -168,7 +168,8 @@ class MainActivity : ComponentActivity() {
             Card(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF1C1C1E))) {
                 Column(Modifier.padding(16.dp)) {
                     Text("Günlük Ciro", color = Color.Gray, fontSize = 12.sp)
-                    Text("₺${String.format("%.2f", totalRevenue)}", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    // Locale.US ekleyerek nokta/virgül uyarısını giderdik
+                    Text("₺${String.format(Locale.US, "%.2f", totalRevenue)}", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     if (salesList.isNotEmpty()) {
                         HorizontalDivider(Modifier.padding(vertical = 12.dp), color = Color.DarkGray, thickness = 0.5.dp)
                         ChartContent(salesList)
@@ -236,5 +237,8 @@ class MainActivity : ComponentActivity() {
         }, NfcAdapter.FLAG_READER_NFC_A or NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK, null)
     }
 
-    override fun onPause() { super.onResume(); nfcAdapter?.disableReaderMode(this) }
+    override fun onPause() {
+        super.onPause() // Hatayı düzelttim: Artık super.onResume() değil, doğru metod çağrılıyor.
+        nfcAdapter?.disableReaderMode(this)
+    }
 }
