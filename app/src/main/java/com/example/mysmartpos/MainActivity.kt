@@ -32,7 +32,7 @@ import kotlinx.coroutines.*
 import java.text.SimpleDateFormat
 import java.util.*
 
-// --- 1. VERİTABANI (Aynı Kalıyor) ---
+// --- 1. VERİTABANI KATMANI ---
 @Entity(tableName = "sales")
 data class Sale(@PrimaryKey(autoGenerate = true) val id: Int = 0, val amount: String, val cardId: String, val date: String)
 
@@ -50,7 +50,7 @@ abstract class AppDatabase : RoomDatabase() {
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null
         fun getDatabase(context: Context): AppDatabase = INSTANCE ?: synchronized(this) {
-            val instance = Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, "blue_lion_pos_db").fallbackToDestructiveMigration().build()
+            val instance = Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, "blue_lion_final_db").fallbackToDestructiveMigration().build()
             INSTANCE = instance
             instance
         }
@@ -101,10 +101,9 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // --- YENİ EKLEME: GRAFİK BİLEŞENİ ---
     @Composable
     fun ChartContent(sales: List<Sale>) {
-        val lastSales = sales.take(5).reversed() // Son 5 satışı al ve kronolojik diz
+        val lastSales = sales.take(5).reversed()
         val maxAmount = lastSales.maxOfOrNull { it.amount.toDoubleOrNull() ?: 1.0 } ?: 1.0
 
         Column(modifier = Modifier.fillMaxWidth().padding(top = 16.dp)) {
@@ -117,21 +116,12 @@ class MainActivity : ComponentActivity() {
             ) {
                 lastSales.forEach { sale ->
                     val amount = sale.amount.toDoubleOrNull() ?: 0.0
-                    val ratio = (amount / maxAmount).toFloat().coerceAtLeast(0.1f) // En az minik bir bar görünsün
-
-                    val animatedHeight by animateFloatAsState(
-                        targetValue = ratio,
-                        animationSpec = tween(durationMillis = 1000), label = ""
-                    )
+                    val ratio = (amount / maxAmount).toFloat().coerceAtLeast(0.1f)
+                    val animatedHeight by animateFloatAsState(targetValue = ratio, animationSpec = tween(1000), label = "")
 
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Box(
-                            modifier = Modifier
-                                .width(24.dp)
-                                .fillMaxHeight(animatedHeight)
-                                .background(Color(0xFF007AFF), RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
-                        )
-                        Text(sale.date.take(5), fontSize = 8.sp, color = Color.Gray) // Sadece HH:mm kısmını al
+                        Box(modifier = Modifier.width(24.dp).fillMaxHeight(animatedHeight).background(Color(0xFF007AFF), RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp)))
+                        Text(sale.date.take(5), fontSize = 8.sp, color = Color.Gray)
                     }
                 }
             }
@@ -175,15 +165,13 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            // --- GÜNCELLENMİŞ CİRO KARTI (GRAFİK DAHİL) ---
             Card(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF1C1C1E))) {
                 Column(Modifier.padding(16.dp)) {
                     Text("Günlük Ciro", color = Color.Gray, fontSize = 12.sp)
                     Text("₺${String.format("%.2f", totalRevenue)}", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = Color.White)
-
                     if (salesList.isNotEmpty()) {
-                        Divider(Modifier.padding(vertical = 12.dp), color = Color.DarkGray, thickness = 0.5.dp)
-                        ChartContent(salesList) // Grafiği burada çağırıyoruz
+                        HorizontalDivider(Modifier.padding(vertical = 12.dp), color = Color.DarkGray, thickness = 0.5.dp)
+                        ChartContent(salesList)
                     }
                 }
             }
@@ -194,7 +182,8 @@ class MainActivity : ComponentActivity() {
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("Tutar Girin") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                shape = RoundedCornerShape(12.dp)
+                shape = RoundedCornerShape(12.dp),
+                colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White)
             )
 
             Button(
@@ -247,5 +236,5 @@ class MainActivity : ComponentActivity() {
         }, NfcAdapter.FLAG_READER_NFC_A or NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK, null)
     }
 
-    override fun onPause() { super.onPause(); nfcAdapter?.disableReaderMode(this) }
+    override fun onPause() { super.onResume(); nfcAdapter?.disableReaderMode(this) }
 }
