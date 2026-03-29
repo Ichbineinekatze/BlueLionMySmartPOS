@@ -66,6 +66,7 @@ class MainActivity : ComponentActivity() {
     private val salesList = mutableStateListOf<Sale>()
     private var isSheetOpen by mutableStateOf(false)
     private var isSuccess by mutableStateOf(false)
+    private var showDeleteConfirmation by mutableStateOf(false) // Silme onayı için state
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -101,6 +102,33 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun startNfcReading() {
+        nfcAdapter?.enableReaderMode(this, { tag ->
+            if (isSheetOpen && !isSuccess) {
+                val id = tag.id.joinToString("") { "%02X".format(it) }
+                val time = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
+                runOnUiThread {
+                    isSuccess = true
+                    CoroutineScope(Dispatchers.IO).launch {
+                        db.saleDao().insert(Sale(amount = inputAmount, cardId = id, date = time))
+                        refreshData()
+                        delay(1500)
+                        withContext(Dispatchers.Main) {
+                            isSheetOpen = false
+                            inputAmount = ""
+                            isSuccess = false
+                            stopNfcReading()
+                        }
+                    }
+                }
+            }
+        }, NfcAdapter.FLAG_READER_NFC_A or NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK, null)
+    }
+
+    private fun stopNfcReading() {
+        nfcAdapter?.disableReaderMode(this)
+    }
+
     @Composable
     fun ChartContent(sales: List<Sale>) {
         val lastSales = sales.take(5).reversed()
@@ -130,9 +158,41 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     fun PosContent(modifier: Modifier = Modifier) {
+        // --- SİLME ONAY DİAYLOĞU ---
+        if (showDeleteConfirmation) {
+            AlertDialog(
+                onDismissRequest = { showDeleteConfirmation = false },
+                title = { Text("Geçmişi Sil", color = Color.White) },
+                text = { Text("Tüm işlem geçmişi ve ciro verileri kalıcı olarak silinecek. Emin misiniz?", color = Color.Gray) },
+                containerColor = Color(0xFF1C1C1E),
+                confirmButton = {
+                    TextButton(onClick = {
+                        CoroutineScope(Dispatchers.IO).launch {
+                            db.saleDao().deleteAll()
+                            refreshData()
+                        }
+                        showDeleteConfirmation = false
+                    }) {
+                        Text("SİL", color = Color.Red, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDeleteConfirmation = false }) {
+                        Text("VAZGEÇ", color = Color.White)
+                    }
+                }
+            )
+        }
+
+        // --- ÖDEME DİAYLOĞU ---
         if (isSheetOpen) {
             AlertDialog(
-                onDismissRequest = { if (!isSuccess) isSheetOpen = false },
+                onDismissRequest = {
+                    if (!isSuccess) {
+                        isSheetOpen = false
+                        stopNfcReading()
+                    }
+                },
                 confirmButton = { },
                 containerColor = Color(0xFF1C1C1E),
                 title = {
@@ -160,7 +220,7 @@ class MainActivity : ComponentActivity() {
         Column(modifier.fillMaxSize().padding(16.dp)) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("BLUE LION POS", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color(0xFF007AFF))
-                IconButton(onClick = { CoroutineScope(Dispatchers.IO).launch { db.saleDao().deleteAll(); refreshData() } }) {
+                IconButton(onClick = { showDeleteConfirmation = true }) { // Direkt silmek yerine onay ekranını açıyoruz
                     Icon(Icons.Default.Delete, null, tint = Color.Red.copy(alpha = 0.5f))
                 }
             }
@@ -168,7 +228,6 @@ class MainActivity : ComponentActivity() {
             Card(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF1C1C1E))) {
                 Column(Modifier.padding(16.dp)) {
                     Text("Günlük Ciro", color = Color.Gray, fontSize = 12.sp)
-                    // Locale.US ekleyerek nokta/virgül uyarısını giderdik
                     Text("₺${String.format(Locale.US, "%.2f", totalRevenue)}", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     if (salesList.isNotEmpty()) {
                         HorizontalDivider(Modifier.padding(vertical = 12.dp), color = Color.DarkGray, thickness = 0.5.dp)
@@ -188,7 +247,13 @@ class MainActivity : ComponentActivity() {
             )
 
             Button(
-                onClick = { if (inputAmount.isNotEmpty()) { isSheetOpen = true; isSuccess = false } },
+                onClick = {
+                    if (inputAmount.isNotEmpty()) {
+                        isSheetOpen = true
+                        isSuccess = false
+                        startNfcReading()
+                    }
+                },
                 modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp).height(56.dp),
                 shape = RoundedCornerShape(12.dp)
             ) {
@@ -216,29 +281,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        nfcAdapter?.enableReaderMode(this, { tag ->
-            if (isSheetOpen && !isSuccess) {
-                val id = tag.id.joinToString("") { "%02X".format(it) }
-                val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-                runOnUiThread {
-                    isSuccess = true
-                    CoroutineScope(Dispatchers.IO).launch {
-                        db.saleDao().insert(Sale(amount = inputAmount, cardId = id, date = time))
-                        refreshData()
-                        delay(1500)
-                        withContext(Dispatchers.Main) {
-                            isSheetOpen = false
-                            inputAmount = ""
-                            isSuccess = false
-                        }
-                    }
-                }
-            }
-        }, NfcAdapter.FLAG_READER_NFC_A or NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK, null)
+        stopNfcReading()
     }
 
     override fun onPause() {
-        super.onPause() // Hatayı düzelttim: Artık super.onResume() değil, doğru metod çağrılıyor.
-        nfcAdapter?.disableReaderMode(this)
+        super.onPause()
+        stopNfcReading()
     }
 }
