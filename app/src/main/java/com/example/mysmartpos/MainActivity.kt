@@ -32,7 +32,7 @@ import kotlinx.coroutines.*
 import java.text.SimpleDateFormat
 import java.util.*
 
-// --- VERİTABANI KATMANI ---
+// --- 1. VERİTABANI KATMANI ---
 @Entity(tableName = "sales")
 data class Sale(@PrimaryKey(autoGenerate = true) val id: Int = 0, val amount: String, val cardId: String, val date: String)
 
@@ -57,6 +57,7 @@ abstract class AppDatabase : RoomDatabase() {
     }
 }
 
+// --- 2. ANA EKRAN ---
 class MainActivity : ComponentActivity() {
     private var nfcAdapter: NfcAdapter? = null
     private lateinit var db: AppDatabase
@@ -101,7 +102,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // --- Başarı Titreşimi ---
     private fun triggerSuccessVibration() {
         val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -121,7 +121,7 @@ class MainActivity : ComponentActivity() {
 
                     runOnUiThread {
                         isSuccess = true
-                        triggerSuccessVibration() // KART OKUNDUĞUNDA TİTRET
+                        triggerSuccessVibration()
                         CoroutineScope(Dispatchers.IO).launch {
                             db.saleDao().insert(Sale(amount = inputAmount, cardId = id, date = time))
                             refreshData()
@@ -145,46 +145,68 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // --- ANALİZ GRAFİĞİ BİLEŞENİ ---
+    @Composable
+    fun ChartContent(sales: List<Sale>) {
+        val lastSales = sales.take(5).reversed()
+        val maxAmount = lastSales.maxOfOrNull { it.amount.toDoubleOrNull() ?: 1.0 } ?: 1.0
+
+        Column(modifier = Modifier.fillMaxWidth().padding(top = 16.dp)) {
+            Text("SON 5 İŞLEM ANALİZİ", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
+            Spacer(Modifier.height(12.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth().height(100.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.Bottom
+            ) {
+                lastSales.forEach { sale ->
+                    val amountVal = sale.amount.toDoubleOrNull() ?: 0.0
+                    val ratio = (amountVal / maxAmount).toFloat().coerceAtLeast(0.1f)
+                    val animatedHeight by animateFloatAsState(targetValue = ratio, animationSpec = tween(1000), label = "")
+
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("₺${sale.amount}", fontSize = 9.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(4.dp))
+                        Box(modifier = Modifier.width(30.dp).fillMaxHeight(animatedHeight).background(Color(0xFF007AFF), RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp)))
+                        Text(sale.date.take(5), fontSize = 9.sp, color = Color.Gray)
+                    }
+                }
+            }
+        }
+    }
+
     @Composable
     fun PosContent(modifier: Modifier = Modifier) {
         if (showDeleteConfirmation) {
             AlertDialog(
                 onDismissRequest = { showDeleteConfirmation = false },
                 title = { Text("Verileri Sıfırla") },
-                text = { Text("Tüm geçmiş silinecek. Emin misiniz?") },
+                text = { Text("Tüm işlem geçmişi silinecek. Emin misiniz?") },
                 confirmButton = {
                     TextButton(onClick = {
                         CoroutineScope(Dispatchers.IO).launch { db.saleDao().deleteAll(); refreshData() }
                         showDeleteConfirmation = false
-                    }) { Text("SİL", color = Color.Red) }
+                    }) { Text("SİL", color = Color.Red, fontWeight = FontWeight.Bold) }
                 },
                 dismissButton = {
-                    TextButton(onClick = { showDeleteConfirmation = false }) { Text("İPTAL") }
+                    TextButton(onClick = { showDeleteConfirmation = false }) { Text("İPTAL", color = Color.White) }
                 }
             )
         }
 
         if (isSheetOpen) {
-            LaunchedEffect(isSheetOpen) {
-                startNfcService()
-            }
-
+            LaunchedEffect(isSheetOpen) { startNfcService() }
             AlertDialog(
-                onDismissRequest = {
-                    if (!isSuccess) {
-                        isSheetOpen = false
-                        stopNfcService()
-                    }
-                },
+                onDismissRequest = { if (!isSuccess) { isSheetOpen = false; stopNfcService() } },
                 confirmButton = { },
                 containerColor = Color(0xFF1C1C1E),
                 title = {
                     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                         if (isSuccess) {
                             Icon(Icons.Default.CheckCircle, null, Modifier.size(64.dp), Color.Green)
-                            Text("ÖDEME TAMAM", color = Color.Green)
+                            Text("ÖDEME BAŞARILI", color = Color.Green)
                         } else {
-                            Text("TEMASSIZ KART OKUTUN", color = Color.White)
+                            Text("KARTI OKUTUN", color = Color.White)
                         }
                     }
                 },
@@ -210,8 +232,13 @@ class MainActivity : ComponentActivity() {
 
             Card(Modifier.fillMaxWidth().padding(vertical = 12.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF1C1C1E))) {
                 Column(Modifier.padding(16.dp)) {
-                    Text("Toplam Ciro", color = Color.Gray, fontSize = 12.sp)
-                    Text("₺${String.format(Locale.US, "%.2f", totalRevenue)}", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    Text("GÜNLÜK TOPLAM CİRO", color = Color.Gray, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text("₺${String.format(Locale.US, "%.2f", totalRevenue)}", fontSize = 36.sp, fontWeight = FontWeight.Black, color = Color.White)
+
+                    if (salesList.isNotEmpty()) {
+                        HorizontalDivider(Modifier.padding(vertical = 12.dp), color = Color.DarkGray, thickness = 0.5.dp)
+                        ChartContent(salesList) // GRAFİK BURADA ÇAĞRILIYOR
+                    }
                 }
             }
 
@@ -219,7 +246,7 @@ class MainActivity : ComponentActivity() {
                 value = inputAmount,
                 onValueChange = { if (it.all { c -> c.isDigit() || c == '.' }) inputAmount = it },
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("Tutar") },
+                label = { Text("Tutar Girin") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 singleLine = true,
                 shape = RoundedCornerShape(12.dp),
@@ -236,7 +263,7 @@ class MainActivity : ComponentActivity() {
                 Text("ÖDEME AL", fontWeight = FontWeight.Bold, fontSize = 18.sp)
             }
 
-            Text("GEÇMİŞ İŞLEMLER", fontSize = 12.sp, color = Color.Gray, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
+            Text("İŞLEM GEÇMİŞİ", fontSize = 12.sp, color = Color.Gray, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
             LazyColumn(Modifier.weight(1f)) {
                 items(salesList) { sale ->
                     Row(Modifier.fillMaxWidth().padding(12.dp), Arrangement.SpaceBetween) {
@@ -252,13 +279,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun onResume() {
-        super.onResume()
-        stopNfcService()
-    }
-
-    override fun onPause() {
-        super.onPause()
-        stopNfcService()
-    }
+    override fun onResume() { super.onResume(); stopNfcService() }
+    override fun onPause() { super.onPause(); stopNfcService() }
 }
